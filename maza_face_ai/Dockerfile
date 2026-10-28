@@ -8,8 +8,12 @@ ENV LANG=C.UTF-8 \
     MKL_NUM_THREADS=1 \
     NUMEXPR_NUM_THREADS=1
 
-RUN apk add --no-cache python3 py3-pip libstdc++ libgomp curl \
- && python3 -m venv /opt/venv \
+# Debian-based HA base image (apt, not apk) -> manylinux wheels available for OpenCV
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-venv python3-pip libgomp1 libstdc++6 curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip
 
 COPY requirements.txt /tmp/
