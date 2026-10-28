@@ -1,0 +1,19 @@
+name: "MAZA FACE AI"
+version: "0.1.0"
+slug: "maza_face_ai"
+description: "Локальное обнаружение и сравнение лиц по запросу (YuNet + SFace), без облака"
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: manual
+init: false
+map:
+  - share:rw
+options:
+  log_level: "info"
+  max_runtime_sec: 60
+schema:
+  log_level: "list(debug|info|warning)"
+  max_runtime_sec: "int(10,300)"
+image: "local/{arch}-addon-maza_face_ai"

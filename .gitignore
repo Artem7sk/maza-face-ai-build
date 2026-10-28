@@ -1,0 +1,20 @@
+# НИКОГДА не коммитить:
+frames/
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.avi
+*.mov
+# модели — качаются в CI, не хранятся в git
+*.onnx
+# секреты
+.env
+secrets*
+*.key
+*.pem
+*.token
+# служебное
+__pycache__/
+*.pyc
+*.log
