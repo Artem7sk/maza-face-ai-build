@@ -1,5 +1,5 @@
 name: "MAZA FACE AI"
-version: "0.1.1"
+version: "0.1.2"
 slug: "maza_face_ai"
 description: "Local face detection (YuNet) + recognition (SFace) on demand, fully offline"
 url: "https://github.com/Artem7sk/maza-face-ai-build"

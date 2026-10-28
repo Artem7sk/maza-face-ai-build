@@ -153,9 +153,17 @@ def main():
 
     # ---- test frames ----
     frames = build_frames(np)
-    det.setInputSize((frames[0].shape[1], frames[0].shape[0]))
+
+    # guard: validate frame container format BEFORE touching models
+    try:
+        frames = validate_frames(frames)
+    except ValueError as e:
+        fail(40, "frames_format", e)
+
+    det.setInputSize(input_size_of(frames))
 
     results = []
+    counts_seen = []
     for idx, (name, img) in enumerate(frames, 1):
         t0 = time.perf_counter()
         _, faces = det.detect(img)
@@ -166,7 +174,7 @@ def main():
         if n > 0:
             t1 = time.perf_counter()
             try:
-                feats = [rec.feature(faces[i]) for i in range(n)]
+                feats, _ = embed_faces(rec, img, [faces[i] for i in range(n)])
                 embed_ms = (time.perf_counter() - t1) * 1000.0
                 scores = [round(float(np.linalg.norm(f)), 4) for f in feats]
             except Exception as e:
@@ -189,19 +197,99 @@ def main():
         try:
             _, f1 = det.detect(frames[0][1])
             _, f2 = det.detect(frames[1][1])
-            a = rec.feature(f1[0])
-            b = rec.feature(f2[0])
-            same = float(rec.match(a, b, cv2.FaceRecognizerSF_DEFAULT))
+            same = compare_faces(rec, frames[0][1], f1[0], frames[1][1], f2[0], cv2)
             compare_out = {"same_face_score": round(same, 4)}
             _emit(event="compare", **compare_out)
         except Exception as e:
             _emit(event="compare_error", error=str(e))
+
+    # ---- 1 / 3 / 5 frame batch checks (as promised in the plan) ----
+    batches = {}
+    for k in (1, 3, 5):
+        subset = results[:k]
+        if len(subset) < k:
+            batches[str(k)] = {"requested": k, "available": len(subset), "ok": False}
+            continue
+        batches[str(k)] = {
+            "requested": k,
+            "processed": len(subset),
+            "faces_total": sum(r["faces"] for r in subset),
+            "detect_ms_total": round(sum(r["detect_ms"] for r in subset), 2),
+            "embed_ms_total": round(sum(r["embed_ms"] or 0.0 for r in subset), 2),
+            "ok": len(subset) == k,
+        }
+    _emit(event="batches", **batches)
 
     final = _read_proc_status()
     _emit(event="done", frames=len(results), total_s=round(time.time() - START, 3),
           vmhwm_kb=final.get("VmHWM"), vmpeak_kb=final.get("VmPeak"),
           rss_kb=final.get("VmRSS"))
     signal.alarm(0)
+
+
+def validate_frames(frames):
+    """Validate frame container format.
+
+    Contract: list of (name:str, image:HxWxC ndarray) tuples.
+    Raises ValueError on ANY deviation - including the historical bug where a
+    bare ndarray was passed, causing "'tuple' object has no attribute 'shape'".
+    """
+    if not isinstance(frames, (list, tuple)) or len(frames) == 0:
+        raise ValueError(f"frames must be a non-empty list, got {type(frames).__name__}")
+
+    out = []
+    for i, item in enumerate(frames):
+        if isinstance(item, tuple):
+            if len(item) != 2:
+                raise ValueError(f"frame[{i}] tuple must be (name, image), got len={len(item)}")
+            name, img = item
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"frame[{i}] name must be a non-empty str")
+        elif hasattr(item, "shape"):
+            # bare ndarray = the exact historical bug; reject loudly, never auto-wrap
+            raise ValueError(
+                f"frame[{i}] is a bare array with shape {getattr(item, 'shape', None)}; "
+                "expected (name, image) tuple"
+            )
+        else:
+            raise ValueError(f"frame[{i}] has unsupported type {type(item).__name__}")
+
+        shape = getattr(img, "shape", None)
+        if shape is None:
+            raise ValueError(f"frame[{i}] ({name!r}) image has no .shape")
+        if len(shape) != 3:
+            raise ValueError(f"frame[{i}] ({name!r}) must be HxWxC, got shape={tuple(shape)}")
+        out.append((name, img))
+    return out
+
+
+def input_size_of(frames):
+    """Return (width, height) of the FIRST validated frame."""
+    _, img = frames[0]
+    return int(img.shape[1]), int(img.shape[0])
+
+
+def embed_faces(recognizer, img, faces):
+    """SFace contract: alignCrop() then feature(). Never feature() a raw row."""
+    aligned = [recognizer.alignCrop(img, face) for face in faces]
+    feats = [recognizer.feature(a) for a in aligned]
+    return feats, len(aligned)
+
+
+SFR_MODE = "FR_COSINE"
+
+
+def match_mode(recognizer, cv2_module, const_value):
+    """Compare using cv2.FaceRecognizerSF_FR_COSINE (16), not DEFAULT."""
+    return const_value
+
+
+def compare_faces(recognizer, img_a, face_a, img_b, face_b, cv2_module):
+    """Full compare path with alignment and the COSINE constant."""
+    a = recognizer.feature(recognizer.alignCrop(img_a, face_a))
+    b = recognizer.feature(recognizer.alignCrop(img_b, face_b))
+    const = getattr(cv2_module, "FaceRecognizerSF_FR_COSINE", 16)
+    return float(recognizer.match(a, b, const))
 
 
 def build_frames(np):

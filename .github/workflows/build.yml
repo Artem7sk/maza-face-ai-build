@@ -6,6 +6,27 @@ on:
     branches: [main]
 
 jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install minimal deps
+        run: pip install --no-cache-dir numpy==1.26.4
+
+      - name: Prepare app dir for import
+        run: |
+          mkdir -p /app
+          cp maza_face_ai/app/main.py /app/main.py
+          cp -r maza_face_ai/tests /app/tests
+
+      - name: Run unit tests (frame format + SFace contract)
+        run: python -m unittest discover -s /app/tests -v
+
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -38,14 +59,14 @@ jobs:
           push: true
           load: true
           tags: |
-            ghcr.io/artem7sk/maza-face-ai:0.1.1
+            ghcr.io/artem7sk/maza-face-ai:0.1.2
             ghcr.io/artem7sk/maza-face-ai:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   smoke:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [unit, build]
     permissions:
       contents: read
       packages: read
@@ -58,18 +79,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull image
-        run: docker pull ghcr.io/artem7sk/maza-face-ai:0.1.1
+        run: docker pull ghcr.io/artem7sk/maza-face-ai:0.1.2
 
       - name: Image size
         run: |
           echo "=== SIZE ==="
-          docker image inspect ghcr.io/artem7sk/maza-face-ai:0.1.1 \
+          docker image inspect ghcr.io/artem7sk/maza-face-ai:0.1.2 \
             --format '{{.Size}}' | awk '{printf "%.1f MB (uncompressed)\n", $1/1024/1024}'
 
       - name: Verify models inside image
         run: |
           echo "=== MODELS in image ==="
-          docker run --rm --entrypoint sh ghcr.io/artem7sk/maza-face-ai:0.1.1 -c \
+          docker run --rm --entrypoint sh ghcr.io/artem7sk/maza-face-ai:0.1.2 -c \
             'ls -la /app/models && sha256sum /app/models/*.onnx'
 
       - name: Smoke run with hard container limits
@@ -82,7 +103,7 @@ jobs:
             --name maza-smoke \
             -v /tmp/smokeout:/out \
             --entrypoint python3 \
-            ghcr.io/artem7sk/maza-face-ai:0.1.1 /app/main.py \
+            ghcr.io/artem7sk/maza-face-ai:0.1.2 /app/main.py \
             > /tmp/smoke.stdout 2> /tmp/smoke.stderr
           RC=$?
           set -e
@@ -101,6 +122,19 @@ jobs:
           echo "=== EXIT CODE: $(cat /tmp/rc.txt) ==="
           echo "=== JSON EVENTS ==="
           grep -E '^\{' /tmp/smoke.stdout || echo "(нет JSON в stdout)"
+
+      - name: Upload smoke logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: |
+            /tmp/smoke.stdout
+            /tmp/smoke.stderr
+            /tmp/smokeout/events.jsonl
+            /tmp/rc.txt
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Assert limits applied and frames processed
         run: |

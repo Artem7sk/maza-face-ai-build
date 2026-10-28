@@ -11,7 +11,7 @@ ENV LANG=C.UTF-8 \
 
 # libgomp1 required by OpenCV; curl for model download
 # Home Assistant add-on image labels (picked up by Supervisor)
-ARG BUILD_VERSION="0.1.1"
+ARG BUILD_VERSION="0.1.2"
 ARG BUILD_ARCH="amd64"
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
@@ -36,6 +36,7 @@ RUN mkdir -p /app/models \
 
 COPY run.sh /run.sh
 COPY app /app
+COPY tests /app/tests
 RUN chmod a+x /run.sh
 
 WORKDIR /app
