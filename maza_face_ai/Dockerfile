@@ -11,13 +11,13 @@ ENV LANG=C.UTF-8 \
 
 # libgomp1 required by OpenCV; curl for model download
 # Home Assistant add-on image labels (picked up by Supervisor)
-ARG BUILD_VERSION="0.1.2"
+ARG BUILD_VERSION="0.1.3"
 ARG BUILD_ARCH="amd64"
 LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.type="app" \
       io.hass.arch="${BUILD_ARCH}"
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 curl ca-certificates \
+ && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 curl ca-certificates ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/

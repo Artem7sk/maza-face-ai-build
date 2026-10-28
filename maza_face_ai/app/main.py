@@ -12,8 +12,10 @@ import json
 import time
 import resource
 import signal
+import tempfile
 
 MEM_LIMIT_BYTES = 512 * 1024 * 1024
+MAX_INPUT_FRAMES = 5
 START = time.time()
 
 
@@ -151,8 +153,24 @@ def main():
     _emit(event="models_loaded", vmhwm_kb=_read_proc_status().get("VmHWM"),
           elapsed_s=round(time.time() - START, 3))
 
-    # ---- test frames ----
-    frames = build_frames(np)
+    # ---- input: file mode (validated path) or synthetic mode ----
+    mode = os.environ.get("MAZA_MODE", "synthetic").strip().lower()
+    input_path = os.environ.get("MAZA_INPUT_PATH", "").strip()
+    file_meta = None
+
+    if mode == "file":
+        if not input_path:
+            fail(50, "input", "mode=file but input_path is empty")
+        workdir = tempfile.mkdtemp(prefix="mazaf_", dir="/tmp")
+        try:
+            frames, file_meta = load_file_frames(np, input_path, workdir,
+                                                max_frames=MAX_INPUT_FRAMES)
+        except Exception as e:
+            fail(51, "input", e)
+        _emit(event="input_source", **{k: v for k, v in file_meta.items() if k != "video"},
+              video=file_meta.get("video"))
+    else:
+        frames = build_frames(np)
 
     # guard: validate frame container format BEFORE touching models
     try:
@@ -225,6 +243,47 @@ def main():
           vmhwm_kb=final.get("VmHWM"), vmpeak_kb=final.get("VmPeak"),
           rss_kb=final.get("VmRSS"))
     signal.alarm(0)
+
+
+def load_file_frames(np, input_path, workdir, max_frames=5):
+    """Load frames from an allowed MP4/JPG input. Returns (frames, meta).
+
+    Rejects any path outside /media/face_test. Never uses a shell.
+    """
+    import pathsafe
+    import frameselect
+
+    real = pathsafe.resolve_input(input_path)
+    files = pathsafe.list_inputs(real)
+
+    exts = {os.path.splitext(f)[1].lower() for f in files}
+    video_exts = {".mp4", ".mov", ".mkv"}
+    image_exts = {".jpg", ".jpeg", ".png"}
+
+    if exts & video_exts:
+        video = [f for f in files if os.path.splitext(f)[1].lower() in video_exts][0]
+        ex = frameselect.extract_candidates(video, workdir)
+        probed = ex["info"]
+        candidates = ex["frames"]
+    elif exts and exts <= image_exts:
+        probed = None
+        candidates = [{"path": f, "ts": None} for f in files]
+    else:
+        raise ValueError(f"unsupported input types: {sorted(exts)}")
+
+    import cv2
+    frames = []
+    for c in candidates[:max_frames * 3]:
+        img = cv2.imread(c["path"], cv2.IMREAD_COLOR)
+        if img is None:
+            continue
+        frames.append((os.path.basename(c["path"]), img))
+    if not frames:
+        raise ValueError("no readable frames in input")
+
+    meta = {"input": real, "files": len(files),
+            "video": probed, "loaded": len(frames)}
+    return frames, meta
 
 
 def validate_frames(frames):
