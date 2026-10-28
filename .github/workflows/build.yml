@@ -19,7 +19,7 @@ jobs:
         run: pip install --no-cache-dir numpy==1.26.4
 
       - name: Run unit tests (frame format + SFace contract)
-        run: python -m unittest discover -s maza_face_ai/tests -t maza_face_ai/app -v
+        run: python -m unittest discover -s maza_face_ai/tests -t . -v
 
   build:
     runs-on: ubuntu-latest
