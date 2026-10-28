@@ -1,4 +1,4 @@
-name: Build MAZA FACE AI image
+name: Build and test MAZA FACE AI
 
 on:
   workflow_dispatch:
@@ -11,6 +11,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +25,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - id: meta
+        name: Image name
+        run: echo "image=ghcr.io/artem7sk/maza-face-ai" >> "$GITHUB_OUTPUT"
+
       - name: Build and push amd64
         uses: docker/build-push-action@v6
         with:
@@ -30,8 +36,126 @@ jobs:
           file: ./maza_face_ai/Dockerfile
           platforms: linux/amd64
           push: true
+          load: true
           tags: |
-            ghcr.io/artem7sk/maza-face-ai:0.1.0
+            ghcr.io/artem7sk/maza-face-ai:0.1.1
             ghcr.io/artem7sk/maza-face-ai:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image
+        run: docker pull ghcr.io/artem7sk/maza-face-ai:0.1.1
+
+      - name: Image size
+        run: |
+          echo "=== SIZE ==="
+          docker image inspect ghcr.io/artem7sk/maza-face-ai:0.1.1 \
+            --format '{{.Size}}' | awk '{printf "%.1f MB (uncompressed)\n", $1/1024/1024}'
+
+      - name: Verify models inside image
+        run: |
+          echo "=== MODELS in image ==="
+          docker run --rm --entrypoint sh ghcr.io/artem7sk/maza-face-ai:0.1.1 -c \
+            'ls -la /app/models && sha256sum /app/models/*.onnx'
+
+      - name: Smoke run with hard container limits
+        run: |
+          echo "=== CONTAINER RUN: --cpus=1 --memory=512m --memory-swap=512m ==="
+          set +e
+          /usr/bin/time -v docker run --rm \
+            --cpus=1 --memory=512m --memory-swap=512m \
+            --entrypoint python3 \
+            ghcr.io/artem7sk/maza-face-ai:0.1.1 /app/main.py 2>&1 | tee /tmp/smoke.log
+          RC=${PIPESTATUS[0]}
+          echo "EXIT_CODE=$RC"
+          echo "$RC" > /tmp/rc.txt
+          exit 0
+
+      - name: Show results
+        run: |
+          echo "=== SMOKE OUTPUT ==="
+          cat /tmp/smoke.log
+          echo
+          echo "=== EXIT CODE: $(cat /tmp/rc.txt) ==="
+
+      - name: Assert limits applied and frames processed
+        run: |
+          python3 - <<'PY'
+          import json, re, sys
+          log = open("/tmp/smoke.log", errors="replace").read()
+          events = []
+          for line in log.splitlines():
+              line = line.strip()
+              if line.startswith("{") and line.endswith("}"):
+                  try:
+                      events.append(json.loads(line))
+                  except Exception:
+                      pass
+          names = [e.get("event") for e in events]
+          print("events:", names)
+
+          rc = int(open("/tmp/rc.txt").read().strip() or 99)
+          print("container exit code:", rc)
+
+          def ev(name):
+              for e in events:
+                  if e.get("event") == name:
+                      return e
+              return None
+
+          fail = []
+
+          lim = ev("limits_applied")
+          if not lim:
+              fail.append("limits_applied event missing (fail-closed guard did not pass)")
+          else:
+              if lim.get("rlimit_as_bytes") != 536870912:
+                  fail.append(f"RLIMIT_AS wrong: {lim.get('rlimit_as_bytes')}")
+              if not lim.get("affinity_ok"):
+                  fail.append("affinity not applied")
+              print("limits:", json.dumps(lim))
+
+          if not ev("opencv_ready"):
+              fail.append("opencv_ready missing - OpenCV failed to load under RLIMIT_AS 512MB")
+          if not ev("models_loaded"):
+              fail.append("models_loaded missing - YuNet/SFace failed to load")
+
+          frames = [e for e in events if e.get("event") == "frame"]
+          print("frames processed:", len(frames))
+          if len(frames) != 5:
+              fail.append(f"expected 5 frames, got {len(frames)}")
+
+          done = ev("done")
+          if not done:
+              fail.append("done event missing")
+          else:
+              print("DONE:", json.dumps(done))
+              print(f"peak VmHWM: {done.get('vmhwm_kb')} kB")
+
+          for f in frames:
+              print(f"  {f.get('frame')}: faces={f.get('faces')} detect={f.get('detect_ms')}ms embed={f.get('embed_ms')}ms")
+
+          if rc != 0:
+              fail.append(f"container exited with code {rc}")
+
+          if fail:
+              print("\nFAILED:")
+              for f in fail:
+                  print(" -", f)
+              sys.exit(1)
+          print("\nALL CHECKS PASSED")
+          PY

@@ -1,19 +1,17 @@
 name: "MAZA FACE AI"
-version: "0.1.0"
+version: "0.1.1"
 slug: "maza_face_ai"
-description: "Локальное обнаружение и сравнение лиц по запросу (YuNet + SFace), без облака"
+description: "Local face detection (YuNet) + recognition (SFace) on demand, fully offline"
+url: "https://github.com/Artem7sk/maza-face-ai-build"
 arch:
   - amd64
-  - aarch64
 startup: application
-boot: manual
+boot: manual_only
 init: false
-map:
-  - share:rw
+image: "ghcr.io/artem7sk/maza-face-ai"
 options:
   log_level: "info"
   max_runtime_sec: 60
 schema:
   log_level: "list(debug|info|warning)"
   max_runtime_sec: "int(10,300)"
-image: "local/{arch}-addon-maza_face_ai"
