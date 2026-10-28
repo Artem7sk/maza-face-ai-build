@@ -33,7 +33,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/maza-face-ai:0.1.0
-            ghcr.io/${{ github.repository_owner }}/maza-face-ai:latest
+            ghcr.io/artem7sk/maza-face-ai:0.1.0
+            ghcr.io/artem7sk/maza-face-ai:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
