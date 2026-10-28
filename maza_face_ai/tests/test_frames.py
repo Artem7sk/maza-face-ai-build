@@ -5,10 +5,24 @@ Runs WITHOUT OpenCV models: uses fakes to prove the call contract.
 Guards against the exact regression that broke run 40691404641:
     AttributeError: 'tuple' object has no attribute 'shape'
 """
+import os
 import sys
+import types
 import unittest
 
-sys.path.insert(0, "/app")
+# resolve main.py relative to this test file (works in container AND CI workspace)
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_PARENT = os.path.dirname(_HERE)
+_CANDIDATES = [
+    _PARENT,                      # <repo>/maza_face_ai/app  (test in app/tests)
+    os.path.join(_PARENT, "app"), # <repo>/maza_face_ai/app
+    _HERE,
+    "/app",                       # inside the built container
+]
+_APP_DIR = next((c for c in _CANDIDATES if os.path.isfile(os.path.join(c, "main.py"))), None)
+if _APP_DIR is None:
+    raise SystemExit(f"main.py not found; looked in: {_CANDIDATES}")
+sys.path.insert(0, _APP_DIR)
 
 import main as m  # noqa: E402
 
@@ -100,14 +114,28 @@ class TestSFaceContract(unittest.TestCase):
         self.assertEqual(feats, ["FEATURE"])
 
     def test_match_uses_fr_cosine_constant(self):
-        """match() must be called with FaceRecognizerSF_FR_COSINE."""
+        """match() must be CALLED with FaceRecognizerSF_FR_COSINE (16), not DEFAULT."""
         rec = FakeRecognizer()
-        const = getattr(m, "SFR_MODE", None)
-        self.assertEqual(const, "FR_COSINE",
-                         "module must expose SFR_MODE='FR_COSINE' (cv2.FaceRecognizerSF_FR_COSINE)")
-        mode = m.match_mode(rec, cv2_module=None, const_value=16)
-        self.assertEqual(mode, 16)
-        self.assertEqual(rec.match_args, [16])
+        score = m.match_mode(rec, "FEAT_A", "FEAT_B", const_value=16)
+
+        self.assertEqual(score, 0.99)
+        self.assertEqual(rec.match_args, [16],
+                         "match() must receive the COSINE constant 16")
+
+    def test_compare_faces_calls_match_with_cosine(self):
+        """Full compare path: alignCrop -> feature for both, then match(16)."""
+        rec = FakeRecognizer()
+        cv2_stub = types.SimpleNamespace(FaceRecognizerSF_FR_COSINE=16)
+        img_a, img_b = FakeArray((480, 640, 3)), FakeArray((480, 640, 3))
+
+        score = m.compare_faces(rec, img_a, "FACE_A", img_b, "FACE_B", cv2_stub)
+
+        self.assertEqual(score, 0.99)
+        self.assertEqual(len(rec.aligned_inputs), 2, "alignCrop must run for both faces")
+        self.assertEqual(rec.match_args, [16], "match() must get FR_COSINE")
+        self.assertEqual(rec.feature_inputs,
+                         [("ALIGNED", id(img_a), id("FACE_A")),
+                          ("ALIGNED", id(img_b), id("FACE_B"))])
 
 
 if __name__ == "__main__":

@@ -279,17 +279,21 @@ def embed_faces(recognizer, img, faces):
 SFR_MODE = "FR_COSINE"
 
 
-def match_mode(recognizer, cv2_module, const_value):
-    """Compare using cv2.FaceRecognizerSF_FR_COSINE (16), not DEFAULT."""
-    return const_value
+def match_mode(recognizer, feat_a, feat_b, cv2_module=None, const_value=None):
+    """Compare two features using cv2.FaceRecognizerSF_FR_COSINE, not DEFAULT.
+
+    Returns the similarity score. The COSINE constant (16) is passed to match().
+    """
+    if const_value is None:
+        const_value = getattr(cv2_module, "FaceRecognizerSF_FR_COSINE", 16) if cv2_module else 16
+    return float(recognizer.match(feat_a, feat_b, const_value))
 
 
 def compare_faces(recognizer, img_a, face_a, img_b, face_b, cv2_module):
     """Full compare path with alignment and the COSINE constant."""
     a = recognizer.feature(recognizer.alignCrop(img_a, face_a))
     b = recognizer.feature(recognizer.alignCrop(img_b, face_b))
-    const = getattr(cv2_module, "FaceRecognizerSF_FR_COSINE", 16)
-    return float(recognizer.match(a, b, const))
+    return match_mode(recognizer, a, b, cv2_module)
 
 
 def build_frames(np):

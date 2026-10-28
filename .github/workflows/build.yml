@@ -18,14 +18,8 @@ jobs:
       - name: Install minimal deps
         run: pip install --no-cache-dir numpy==1.26.4
 
-      - name: Prepare app dir for import
-        run: |
-          mkdir -p /app
-          cp maza_face_ai/app/main.py /app/main.py
-          cp -r maza_face_ai/tests /app/tests
-
       - name: Run unit tests (frame format + SFace contract)
-        run: python -m unittest discover -s /app/tests -v
+        run: python -m unittest discover -s maza_face_ai/tests -t maza_face_ai/app -v
 
   build:
     runs-on: ubuntu-latest
