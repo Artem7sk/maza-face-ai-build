@@ -75,36 +75,59 @@ jobs:
       - name: Smoke run with hard container limits
         run: |
           echo "=== CONTAINER RUN: --cpus=1 --memory=512m --memory-swap=512m ==="
+          mkdir -p /tmp/smokeout
           set +e
-          /usr/bin/time -v docker run --rm \
+          docker run --rm \
             --cpus=1 --memory=512m --memory-swap=512m \
+            --name maza-smoke \
+            -v /tmp/smokeout:/out \
             --entrypoint python3 \
-            ghcr.io/artem7sk/maza-face-ai:0.1.1 /app/main.py 2>&1 | tee /tmp/smoke.log
-          RC=${PIPESTATUS[0]}
-          echo "EXIT_CODE=$RC"
+            ghcr.io/artem7sk/maza-face-ai:0.1.1 /app/main.py \
+            > /tmp/smoke.stdout 2> /tmp/smoke.stderr
+          RC=$?
+          set -e
+          echo "DOCKER_EXIT_CODE=$RC"
           echo "$RC" > /tmp/rc.txt
+          echo "=== STDOUT ==="
+          cat /tmp/smoke.stdout || true
+          echo "=== STDERR (tail) ==="
+          tail -40 /tmp/smoke.stderr || true
+          echo "=== DOCKER STATS (peak-ish) ==="
+          docker stats --no-stream --format '{{.MemUsage}} | {{.CPUPerc}}' maza-smoke 2>/dev/null || echo "(container already removed)"
           exit 0
 
       - name: Show results
         run: |
-          echo "=== SMOKE OUTPUT ==="
-          cat /tmp/smoke.log
-          echo
           echo "=== EXIT CODE: $(cat /tmp/rc.txt) ==="
+          echo "=== JSON EVENTS ==="
+          grep -E '^\{' /tmp/smoke.stdout || echo "(нет JSON в stdout)"
 
       - name: Assert limits applied and frames processed
         run: |
+          echo "=== /tmp/smokeout ==="
+          ls -la /tmp/smokeout || true
           python3 - <<'PY'
-          import json, re, sys
-          log = open("/tmp/smoke.log", errors="replace").read()
+          import json, sys, os
+
           events = []
-          for line in log.splitlines():
-              line = line.strip()
-              if line.startswith("{") and line.endswith("}"):
-                  try:
-                      events.append(json.loads(line))
-                  except Exception:
-                      pass
+          ev_path = "/tmp/smokeout/events.jsonl"
+          if os.path.isfile(ev_path):
+              for line in open(ev_path, errors="replace"):
+                  line = line.strip()
+                  if line.startswith("{"):
+                      try:
+                          events.append(json.loads(line))
+                      except Exception:
+                          pass
+          else:
+              print("WARNING: events.jsonl not found, falling back to stdout")
+              for line in open("/tmp/smoke.stdout", errors="replace"):
+                  line = line.strip()
+                  if line.startswith("{"):
+                      try:
+                          events.append(json.loads(line))
+                      except Exception:
+                          pass
           names = [e.get("event") for e in events]
           print("events:", names)
 

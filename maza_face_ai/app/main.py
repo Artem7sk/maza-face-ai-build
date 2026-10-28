@@ -17,8 +17,31 @@ MEM_LIMIT_BYTES = 512 * 1024 * 1024
 START = time.time()
 
 
+_EVENTS_FH = None
+
+
+def _events_file():
+    """Optional mirror of JSON events to /out/events.jsonl for CI assertions."""
+    global _EVENTS_FH
+    if _EVENTS_FH is None:
+        try:
+            os.makedirs("/out", exist_ok=True)
+            _EVENTS_FH = open("/out/events.jsonl", "a", buffering=1)
+        except Exception:
+            _EVENTS_FH = False
+    return _EVENTS_FH
+
+
 def _emit(**kw):
-    print(json.dumps(kw, ensure_ascii=False), flush=True)
+    line = json.dumps(kw, ensure_ascii=False)
+    print(line, flush=True)
+    fh = _events_file()
+    if fh:
+        try:
+            fh.write(line + "\n")
+            fh.flush()
+        except Exception:
+            pass
 
 
 def fail(code, stage, err):
