@@ -28,8 +28,6 @@ jobs:
         with:
           context: ./maza_face_ai
           file: ./maza_face_ai/Dockerfile
-          build-args: |
-            BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.22-2025.11.2
           platforms: linux/amd64
           push: true
           tags: |

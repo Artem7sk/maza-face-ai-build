@@ -1,24 +1,21 @@
-ARG BUILD_FROM
-FROM ${BUILD_FROM}
+# Debian slim base: apt available, manylinux wheels for OpenCV available
+FROM python:3.12-slim-bookworm
 
 ENV LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
     OPENBLAS_NUM_THREADS=1 \
     OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
-    NUMEXPR_NUM_THREADS=1
+    NUMEXPR_NUM_THREADS=1 \
+    VIRTUAL_ENV_DISABLE_PROMPT=1
 
-# Debian-based HA base image (apt, not apk) -> manylinux wheels available for OpenCV
+# libgomp1 required by OpenCV; curl for model download
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-venv python3-pip libgomp1 libstdc++6 curl ca-certificates \
+ && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m venv /opt/venv \
- && /opt/venv/bin/pip install --no-cache-dir --upgrade pip
-
 COPY requirements.txt /tmp/
-RUN /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt \
- && rm -f /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm -f /tmp/requirements.txt
 
 # YuNet + SFace with pinned SHA-256 verification
 RUN mkdir -p /app/models \
